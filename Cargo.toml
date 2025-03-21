@@ -1,0 +1,43 @@
+[package]
+name = "esp32-weather"
+version = "0.1.0"
+authors = ["wst7 <wstreet7@outlook.com>"]
+edition = "2021"
+resolver = "2"
+rust-version = "1.77"
+
+[[bin]]
+name = "stdapp"
+harness = false # do not use the built in cargo test harness -> resolve rust-analyzer errors
+
+[profile.release]
+opt-level = "s"
+
+[profile.dev]
+debug = true    # Symbols are nice and they don't increase the size on Flash
+opt-level = "z"
+
+[features]
+default = []
+
+
+
+[dependencies]
+esp-idf-hal = "0.45.2"
+esp-idf-svc = "0.51.0"
+embedded-graphics = "0.8.1"
+ssd1306 = "0.9.0"
+tinybmp = "0.6.0"
+heapless = "0.8.0"
+embedded-svc = "0.28.1"
+anyhow = "1.0.97"
+serde = "1.0.219"
+serde_json = "1.0.140"
+log = "0.4.26"
+qrcodegen = "1.8.0"
+embedded-layout = "0.4.1"
+chrono = { version = "0.4", default-features = false, features = ["now"] }
+chrono-tz = { version = "0.10", default-features = false }
+
+[build-dependencies]
+embuild = "0.33"

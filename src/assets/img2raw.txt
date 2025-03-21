@@ -1,0 +1,1 @@
+magick wifi.png -size 16x16 -depth 1 gray:wifi.raw
