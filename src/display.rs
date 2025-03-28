@@ -1,13 +1,12 @@
 use embedded_graphics::{
     draw_target::DrawTarget,
     image::{Image, ImageRaw, ImageRawLE},
-    mono_font::{ascii::FONT_7X13, MonoTextStyle},
     pixelcolor::BinaryColor,
     prelude::Point,
     text::Text,
     Drawable,
 };
-use embedded_layout::{layout::linear::LinearLayout, prelude::Views, View};
+use embedded_layout::{layout::linear::LinearLayout, prelude::Chain};
 use esp_idf_hal::i2c::I2cDriver;
 use ssd1306::{
     mode::{BufferedGraphicsMode, DisplayConfig},
@@ -15,6 +14,7 @@ use ssd1306::{
     size::DisplaySize128x64,
     I2CDisplayInterface, Ssd1306,
 };
+use u8g2_fonts::{fonts::u8g2_font_wqy12_t_gb2312, U8g2TextStyle};
 
 use crate::wifi::WifiStatus;
 
@@ -61,29 +61,42 @@ impl<'a> Display<'a> {
     pub fn update_time(&mut self, time: String) {
         self.time = time;
         self.update_ui();
-    }
+    } 
+
+    // TODO: 优化布局
     fn update_ui(&mut self) {
-        let style = MonoTextStyle::new(&FONT_7X13, BinaryColor::On);
-        let time = format!("Time: {}", self.time);
-        let status = format!("Wi-Fi: {}", self.wifi_status.to_string());
-        let wifi_status = Text::new(&status, Point::new(0, 60), style);
-        
+        let style = U8g2TextStyle::new(u8g2_font_wqy12_t_gb2312, BinaryColor::On);
 
         let ip_string = format!("IP: {}", self.wifi_ip);
-        let wether_string = format!("Weather: {}", self.weather);
-        let ip_address = Text::new(&ip_string, Point::new(0, 90), style);
-        let weather = Text::new(&wether_string, Point::new(0, 120), style);
-        let time = Text::new(&time, Point::new(0, 120), style);
-        let mut texts = [time, wifi_status, ip_address, weather];
-        let views = Views::new(&mut texts);
-        let layout = LinearLayout::vertical(views).arrange();
-        self.screen.clear(BinaryColor::Off).unwrap();
-        layout.draw(&mut self.screen).unwrap();
+        let ip_address = Text::new(&ip_string, Point::new(0, 90), style.clone());
+
+        let wether_string = format!("温度: {}℃", self.weather);
+        let weather = Text::new(&wether_string, Point::new(0, 120), style.clone());
+
+        let time = format!("时间: {}", self.time);
+        let time = Text::new(&time, Point::new(0, 120), style.clone());
+
         let raw: ImageRawLE<'a, BinaryColor> =
-        ImageRaw::new(include_bytes!("./assets/wifi.raw"), 16);
-    Image::new(&raw, Point::new(0, 40))
-        .draw(&mut self.screen)
-        .unwrap();
+            ImageRaw::new(include_bytes!("./assets/wifi.raw"), 16);
+        let icon = Image::new(&raw, Point::new(0, 40));
+
+        let views = Chain::new(LinearLayout::horizontal(Chain::new(icon).append(time)))
+            .append(ip_address)
+            .append(weather);
+
+        let layout = LinearLayout::vertical(views).arrange();
+
+        self.screen.clear(BinaryColor::Off).unwrap();
+
+        layout.draw(&mut self.screen).unwrap();
+
+        self.screen.flush().unwrap();
+    }
+    pub fn show_message(&mut self, message: &str) {
+        let style = U8g2TextStyle::new(u8g2_font_wqy12_t_gb2312, BinaryColor::On);
+        let text = Text::new(message, Point::new(0, 0), style.clone());
+        self.screen.clear(BinaryColor::Off).unwrap();
+        text.draw(&mut self.screen).unwrap();
         self.screen.flush().unwrap();
     }
 }

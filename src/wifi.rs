@@ -47,6 +47,18 @@ impl<'d> WiFiManager<'d> {
         )?;
         Ok(Self { wifi })
     }
+    // pub fn start_ap(&mut self) -> anyhow::Result<()> {
+    //     let config = Configuration::AccessPoint(AccessPointConfiguration {
+    //         ssid: HString::try_from("ESP32_Weather_App").unwrap(),
+    //         password: HString::try_from("").unwrap(),
+    //         channel: 1,
+    //         auth_method: AuthMethod::None,
+    //         max_connections: 4,
+    //         ..Default::default()
+    //     });
+    //     self.wifi.set_configuration(&config)?;
+    //     Ok(())
+    // }
     pub async fn connect(&mut self) -> anyhow::Result<()> {
         self.set_config()?;
 
@@ -89,41 +101,7 @@ impl<'d> WiFiManager<'d> {
             return Ok((WifiStatus::Connecting, String::from("0.0.0.0")));
         }
     }
-    // pub fn draw_wifi_icon_use_raw(connected: bool, display: &mut SSD1306Display<'d>) {
-    //     let raw: ImageRawLE<BinaryColor> = ImageRaw::new(include_bytes!("./assets/wifi.raw"), 16);
-    //     Image::new(&raw, Point::zero()).draw(display).unwrap();
-    //     // flush the display
-    //     display.flush().unwrap();
-    // }
-    // pub fn draw_wifi_icon(connected: bool, display: &mut SSD1306Display<'d>) {
-    //     let style = PrimitiveStyle::with_stroke(BinaryColor::On, 1);
-    //     let center = Point::new(8, 10);
-    //     let radius = 8;
-    //     let angle_start = 230.0.deg();
-    //     let angle_sweep = 80.0.deg();
-
-    //     for i in 0..3 {
-    //         let radius = radius - i * 2;
-
-    //         let point = Point::new(center.x - radius as i32, center.y - radius as i32);
-    //         Arc::new(point, radius * 2, angle_start, angle_sweep)
-    //             .into_styled(style)
-    //             .draw(display)
-    //             .unwrap();
-    //     }
-    //     let point = Point::new(center.x - 1, center.y - 2);
-    //     Pixel(point, BinaryColor::On).draw(display).unwrap();
-
-    //     if (!connected) {
-    //         Line::new(
-    //             Point::new(center.x - 1, center.y - 3),
-    //             Point::new(center.x - 1, center.y - 8),
-    //         )
-    //         .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 1))
-    //         .draw(display)
-    //         .unwrap();
-    //     }
-    // }
+    
 }
 
 // pub fn start_wifi_ap(modem: Modem) -> BlockingWifi<EspWifi<'static>> {

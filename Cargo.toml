@@ -38,6 +38,7 @@ qrcodegen = "1.8.0"
 embedded-layout = "0.4.1"
 chrono = { version = "0.4", default-features = false, features = ["now"] }
 chrono-tz = { version = "0.10", default-features = false }
+u8g2-fonts = { version = "0.5.2", features = ["embedded_graphics_textstyle"]}
 
 [build-dependencies]
 embuild = "0.33"
