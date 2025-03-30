@@ -6,6 +6,7 @@ mod display;
 mod weather;
 mod wifi;
 mod button;
+mod state;
 
 fn main() {
     // Initialize the IDF stuff and logger
@@ -13,5 +14,5 @@ fn main() {
     esp_idf_svc::log::EspLogger::initialize_default();
 
     let mut app = app::App::new().unwrap();
-    app.start();
+    app.run();
 }

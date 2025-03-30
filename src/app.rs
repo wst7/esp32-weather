@@ -1,42 +1,67 @@
 use crate::{
     button::Button,
     display::Display,
+    state::State,
     weather::WeatherClient,
     wifi::{WiFiManager, WifiStatus},
 };
 use chrono::Utc;
-use chrono_tz::Asia;
+use chrono_tz::Asia::Shanghai;
 use esp_idf_hal::{
+    gpio::{Gpio15, Gpio18, Gpio19, Gpio4},
     i2c::{I2cConfig, I2cDriver},
     prelude::Peripherals,
-    sys,
     task::block_on,
     units::KiloHertz,
 };
 use esp_idf_svc::sntp::{EspSntp, SntpConf, SyncStatus};
 use log::info;
 use std::{
-    sync::{Arc, Mutex},
+    sync::{
+        mpsc::{self, Sender},
+        Arc, Mutex,
+    },
     thread,
     time::Duration,
 };
 
-#[derive(Clone)]
-pub enum DeviceStatus {
-    Booting,
-    Idle,
-    Connecting,
-    Connected,
-    Updating,
-    Sleeping,
-    Rebooting,
+#[derive(Clone, Debug)]
+pub enum AppPage {
+    Home,
+    WifiConfig,
 }
+impl AppPage {
+    pub fn next(&self) -> Self {
+        match self {
+            AppPage::Home => AppPage::WifiConfig,
+            AppPage::WifiConfig => AppPage::Home,
+        }
+    }
+    pub fn prev(&self) -> Self {
+        match self {
+            AppPage::Home => AppPage::WifiConfig,
+            AppPage::WifiConfig => AppPage::Home,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum DisplayMessage {
+    ShowPage(AppPage),
+    UpdateTime(String, String),
+    UpdateWeather(String, String),
+    UpdateWifi(WifiStatus, String),
+}
+
 pub struct App {
-    display: Arc<Mutex<Display<'static>>>,
+    current_page: Arc<Mutex<AppPage>>,
+    display_tx: Sender<DisplayMessage>,
     wifi: Arc<Mutex<WiFiManager<'static>>>,
     weather_client: Arc<Mutex<WeatherClient>>,
-    status: Arc<Mutex<DeviceStatus>>,
-    idle_loop_time: u64,
+    display: Arc<Mutex<Display<'static>>>,
+    state: Arc<Mutex<State>>,
+    left_button: Arc<Mutex<Button<Gpio4>>>,
+    right_button: Arc<Mutex<Button<Gpio15>>>,
 }
 
 impl App {
@@ -54,139 +79,202 @@ impl App {
         let display = Arc::new(Mutex::new(Display::new(i2c)));
         let wifi = Arc::new(Mutex::new(WiFiManager::new(modem)?));
         let weather_client = Arc::new(Mutex::new(WeatherClient::new()));
-        let status = Arc::new(Mutex::new(DeviceStatus::Booting));
-
-        Ok(Self {
-            display,
+        let (display_tx, display_rx) = mpsc::channel();
+        let ins = Self {
+            current_page: Arc::new(Mutex::new(AppPage::Home)),
             wifi,
             weather_client,
-            status,
-            idle_loop_time: 0
-        })
+            display,
+            display_tx,
+            state: Arc::new(Mutex::new(State::new())),
+            left_button: Arc::new(Mutex::new(Button::new(peripherals.pins.gpio4)?)),
+            right_button: Arc::new(Mutex::new(Button::new(peripherals.pins.gpio15)?)),
+        };
+        let ins_state = ins.state.clone();
+        thread::Builder::new()
+            .stack_size(6000)
+            .spawn(move || {
+                for message in display_rx {
+                    info!("DisplayController: {:?}", message);
+                    match message {
+                        DisplayMessage::ShowPage(page) => {
+                            ins_state.lock().unwrap().update_page(page);
+                        }
+                        DisplayMessage::UpdateTime(date, time) => {
+                            ins_state.lock().unwrap().update_date_time(date, time);
+                        }
+                        DisplayMessage::UpdateWeather(weather, city) => {
+                            ins_state.lock().unwrap().update_weather(weather, city);
+                        }
+                        DisplayMessage::UpdateWifi(status, ip) => {
+                            ins_state.lock().unwrap().update_wifi(status, ip);
+                        }
+                    }
+                }
+            })
+            .unwrap();
+        Ok(ins)
     }
+    pub fn run(&mut self) {
+        self.wifi_thread();
+        self.sntp_thread();
+        self.weather_thread();
+        self.actions_thread();
 
-    pub fn start(&mut self) {
-        self.update_status(DeviceStatus::Booting);
-        let peripherals = Peripherals::take().unwrap();
-        let mut button = Button::new(peripherals.pins.gpio4).unwrap();
-        let status = self.status.clone();
-        let _ = button.subscribe(move || {
-            let mut status = status.lock().unwrap();
-            *status = DeviceStatus::Updating;
-        });
-        block_on(self.run_state_machine());
-    }
-    async fn run_state_machine(&mut self) {
         loop {
-            let current_status = self.status.lock().unwrap().clone();
-            match current_status {
-                DeviceStatus::Booting => {
-                    self.handle_booting().await;
-                    self.update_status(DeviceStatus::Connecting);
-                }
-                DeviceStatus::Connecting => {
-                    self.handle_connecting().await;
-                    self.update_status(DeviceStatus::Connected);
-                }
-                DeviceStatus::Connected => {
-                    self.handle_connected().await;
-                    self.update_status(DeviceStatus::Idle);
-                }
-                DeviceStatus::Updating => {
-                    self.handle_updating().await;
-                    self.update_status(DeviceStatus::Rebooting);
-                }
-                DeviceStatus::Idle => {
-                    self.handle_idle();
-                }
-                DeviceStatus::Sleeping => self.handle_sleeping(),
-                DeviceStatus::Rebooting => {
-                    self.handle_rebooting().await;
-                }
-            }
-            thread::sleep(Duration::from_secs(1)); // 防止 CPU 占用过高
-        }
-    }
-    async fn handle_booting(&self) {
-        self.display.lock().unwrap().show_message("设备启动中...");
-        thread::sleep(Duration::from_secs(2));
-    }
-    async fn handle_connecting(&self) {
-        self.display.lock().unwrap().show_message("连接中...");
-        self.connect_wifi().await;
-    }
-    async fn handle_connected(&self) {
-        self.display
-            .lock()
-            .unwrap()
-            .show_message("连接成功, 正在同步时间...");
-        self.sync_time().await;
-    }
-    async fn handle_updating(&self) {
-        self.display.lock().unwrap().show_message("更新中...");
-        // TODO: 等待更新完成
-        thread::sleep(Duration::from_secs(2));
-    }
-    async fn handle_rebooting(&self) {
-        self.display.lock().unwrap().show_message("即将重启...");
-        thread::sleep(Duration::from_secs(2));
-        unsafe { sys::esp_restart() };
-    }
-    fn handle_idle(&mut self) {
-        let display = self.display.clone();
-        let weather_client = self.weather_client.clone();
-        // 更新时间&天气
-        let now = Utc::now().with_timezone(&Asia::Shanghai);
-        let time = now.format("%H:%M:%S").to_string();
-        display.lock().unwrap().update_time(time);
-
-        // TODO: 有问题,使用thread
-        // esp-idf-hal/examples/ledc_threads.rs at master · esp-rs/esp-idf-hal
-        if self.idle_loop_time % 600 == 0 {
-            let wt = weather_client.lock().unwrap().fetch_weather().unwrap();
-            display.lock().unwrap().update_weather(wt);
-            self.idle_loop_time = 0;
-        }
-        self.idle_loop_time += 1;
-    }
-    fn handle_sleeping(&self) {
-        // TODO: 实现休眠功能
-        self.display.lock().unwrap().show_message("休眠中...");
-    }
-
-    async fn connect_wifi(&self) {
-        let wifi = self.wifi.clone();
-        let display = self.display.clone();
-        wifi.lock().unwrap().connect().await.unwrap();
-        loop {
-            let (status, ip) = wifi.lock().unwrap().get_wifi_status().await.unwrap();
-            display.lock().unwrap().update_wifi(status.clone(), ip);
-            if status == WifiStatus::Connected {
-                println!("Wi-Fi connected! Breaking the loop.");
-                break;
-            }
-            println!("Wi-Fi not connected. Retrying in 2 seconds...");
-            thread::sleep(Duration::from_secs(2));
-        }
-    }
-    async fn sync_time(&self) {
-        let _sntp = EspSntp::new(&SntpConf {
-            servers: ["ntp.aliyun.com"], // ✅ 修改 NTP 服务器
-            ..Default::default()
-        })
-        .unwrap();
-        // 等待 NTP 时间同步
-        loop {
-            if _sntp.get_sync_status() == SyncStatus::Completed {
-                info!("NTP 时间同步完成");
-                break;
-            }
-            info!("等待 NTP 时间同步...");
+            let page = self.current_page.lock().unwrap().clone();
+            self.show_page(page);
             thread::sleep(Duration::from_secs(1));
         }
     }
-    fn update_status(&self, new_status: DeviceStatus) {
-        let mut status = self.status.lock().unwrap();
-        *status = new_status;
+    fn wifi_thread(&mut self) {
+        let wifi = self.wifi.clone();
+        let display_tx = self.display_tx.clone();
+        thread::Builder::new()
+            .stack_size(9000)
+            .spawn(move || {
+                block_on(async {
+                    wifi.lock().unwrap().connect().await.unwrap();
+                    loop {
+                        let (status, ip) = wifi.lock().unwrap().get_wifi_status().await.unwrap();
+
+                        if status == WifiStatus::Connected {
+                            info!("Wi-Fi connected! Breaking the loop.");
+                            display_tx
+                                .send(DisplayMessage::UpdateWifi(status, ip))
+                                .unwrap();
+                            break;
+                        }
+                        info!("Wi-Fi not connected. Retrying in 2 seconds...");
+                        thread::sleep(Duration::from_secs(2));
+                    }
+                });
+            })
+            .unwrap();
+    }
+    fn sntp_thread(&mut self) {
+        let display_tx = self.display_tx.clone();
+        let state = self.state.clone();
+        thread::Builder::new()
+            .stack_size(9000)
+            .spawn(move || {
+                loop {
+                    let (wifi_status, _) = state.lock().unwrap().get_wifi_status();
+                    if wifi_status == WifiStatus::Connected {
+                        break;
+                    }
+                    info!("时间同步模块: 等待 Wi-Fi 连接...");
+                    thread::sleep(Duration::from_secs(1));
+                }
+                let _sntp = EspSntp::new(&SntpConf {
+                    servers: ["ntp.aliyun.com"], // ✅ 修改 NTP 服务器
+                    ..Default::default()
+                })
+                .unwrap();
+                // 等待 NTP 时间同步
+                loop {
+                    if _sntp.get_sync_status() == SyncStatus::Completed {
+                        info!("NTP 时间同步完成");
+                        break;
+                    }
+                    info!("等待 NTP 时间同步...");
+                    thread::sleep(Duration::from_secs(1));
+                }
+                loop {
+                    let now = Utc::now();
+                    let shanghai_time = now.with_timezone(&Shanghai);
+                    let date = shanghai_time.format("%Y-%m-%d").to_string();
+                    let time = shanghai_time.format("%H:%M:%S").to_string();
+                    display_tx
+                        .send(DisplayMessage::UpdateTime(date, time))
+                        .unwrap();
+                    thread::sleep(Duration::from_secs(1));
+                }
+            })
+            .unwrap();
+    }
+    fn weather_thread(&mut self) {
+        let weather_client = self.weather_client.clone();
+        let display_tx = self.display_tx.clone();
+        let state = self.state.clone();
+
+        thread::Builder::new()
+            .stack_size(9000)
+            .spawn(move || {
+                block_on(async {
+                    loop {
+                        let (wifi_status, _) = state.lock().unwrap().get_wifi_status();
+                        if wifi_status == WifiStatus::Connected {
+                            break;
+                        }
+                        info!("天气模块: 等待 Wi-Fi 连接...");
+                        thread::sleep(Duration::from_secs(1));
+                    }
+
+                    loop {
+                        let weather_data = weather_client.lock().unwrap().fetch_weather().unwrap();
+                        display_tx.send(DisplayMessage::UpdateWeather(weather_data.temp, weather_data.city)).unwrap();
+                        thread::sleep(Duration::from_secs(3600));
+                    }
+                })
+            })
+            .unwrap();
+    }
+
+    fn actions_thread(&mut self) {
+        let display_tx = self.display_tx.clone();
+        let current_page = self.current_page.clone();
+        let left = self.left_button.clone();
+        let right = self.right_button.clone();
+
+        thread::Builder::new()
+            .stack_size(9000)
+            .spawn(move || {
+                let display_tx_clone = display_tx.clone();
+                let current_page_clone = current_page.clone();
+                left.lock()
+                    .unwrap()
+                    .subscribe(move || {
+                        display_tx_clone
+                            .send(DisplayMessage::ShowPage(
+                                current_page_clone.lock().unwrap().prev(),
+                            ))
+                            .unwrap();
+                    })
+                    .unwrap();
+                let display_tx_clone = display_tx.clone();
+                let current_page_clone = current_page.clone();
+                right
+                    .lock()
+                    .unwrap()
+                    .subscribe(move || {
+                        display_tx_clone
+                            .send(DisplayMessage::ShowPage(
+                                current_page_clone.lock().unwrap().next(),
+                            ))
+                            .unwrap();
+                    })
+                    .unwrap();
+                loop {
+                    thread::sleep(Duration::from_secs(1));
+                }
+            })
+            .unwrap();
+    }
+
+    fn show_page(&mut self, page: AppPage) {
+       
+        match page {
+            AppPage::Home => self.render_home_page(),
+            AppPage::WifiConfig => self.render_wifi_page(),
+        }
+    }
+
+    fn render_home_page(&mut self) {
+        let state = self.state.lock().unwrap().clone();
+        self.display.lock().unwrap().update_home(state);
+    }
+    fn render_wifi_page(&mut self) {
+        self.display.lock().unwrap().show_wifi_config();
     }
 }

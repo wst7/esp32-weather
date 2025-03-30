@@ -5,6 +5,7 @@ use esp_idf_hal::{
     peripheral::Peripheral,
     sys::{gpio_pull_mode_t_GPIO_PULLUP_ONLY, gpio_set_pull_mode},
 };
+use log::info;
 
 pub struct Button<P: InputPin> {
     btn: PinDriver<'static, P, Input>,
@@ -12,15 +13,12 @@ pub struct Button<P: InputPin> {
 }
 impl<P> Button<P>
 where
-    P: InputPin + 'static,
+    P: InputPin + OutputPin + 'static,
 {
     pub fn new(pin: impl Peripheral<P = P> + 'static) -> anyhow::Result<Self> {
         let mut btn = PinDriver::input(pin)?;
-
-        unsafe {
-            gpio_set_pull_mode(btn.pin(), gpio_pull_mode_t_GPIO_PULLUP_ONLY);
-        }
-        btn.set_interrupt_type(InterruptType::PosEdge)?;
+        btn.set_pull(Pull::Up)?;
+        btn.set_interrupt_type(InterruptType::NegEdge)?;
 
         Ok(Self {
             btn,
@@ -32,11 +30,13 @@ where
         let callback_clone = callback.clone();
         unsafe {
             self.btn.subscribe(move || {
+                log::info!("🔥 按钮中断触发！");
                 if let Ok(mut cb) = callback_clone.lock() {
                     (*cb)();
                 }
             })?;
         }
+        log::info!("✅ 按钮订阅成功！");
         self.callback = Some(callback);
         Ok(())
     }

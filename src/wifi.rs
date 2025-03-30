@@ -17,7 +17,7 @@ const PASSWORD: &str = "Buxingjie007";
 
 // static WIFI_CONFIG: Mutex<Option<(HString<32>, HString<32>)>> = Mutex::new(None);
 
-#[derive(PartialEq, Clone)]
+#[derive(PartialEq, Clone, Debug)]
 pub enum WifiStatus {
     Disconnected,
     Connecting,
