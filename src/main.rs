@@ -1,6 +1,4 @@
 
-
-
 mod app;
 mod display;
 mod weather;

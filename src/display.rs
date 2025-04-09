@@ -12,7 +12,7 @@ use embedded_layout::{
     layout::linear::{spacing::DistributeFill, LinearLayout},
     prelude::Chain,
 };
-use esp_idf_hal::i2c::I2cDriver;
+use esp_idf_svc::hal::i2c::I2cDriver;
 use ssd1306::{
     mode::{BufferedGraphicsMode, DisplayConfig},
     prelude::{DisplayRotation, I2CInterface},

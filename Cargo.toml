@@ -23,22 +23,21 @@ default = []
 
 
 [dependencies]
-esp-idf-hal = "0.45.2"
 esp-idf-svc = "0.51.0"
 embedded-graphics = "0.8.1"
-ssd1306 = "0.9.0"
+ssd1306 = "0.10.0"
 tinybmp = "0.6.0"
 heapless = "0.8.0"
 embedded-svc = "0.28.1"
 anyhow = "1.0.97"
 serde = "1.0.219"
 serde_json = "1.0.140"
-log = "0.4.26"
+log = "0.4.27"
 qrcodegen = "1.8.0"
 embedded-layout = "0.4.1"
 chrono = { version = "0.4", default-features = false, features = ["now"] }
-chrono-tz = { version = "0.10", default-features = false }
-u8g2-fonts = { version = "0.5.2", features = ["embedded_graphics_textstyle"]}
+chrono-tz = { version = "0.10.3", default-features = false }
+u8g2-fonts = { version = "0.6.0", features = ["embedded_graphics_textstyle"]}
 
 [build-dependencies]
 embuild = "0.33"

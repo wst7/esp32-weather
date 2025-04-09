@@ -1,5 +1,5 @@
-use esp_idf_hal::modem::Modem;
 use esp_idf_svc::{
+    hal::modem::Modem,
     eventloop::EspSystemEventLoop,
     nvs::EspDefaultNvsPartition,
     wifi::{

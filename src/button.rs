@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use esp_idf_hal::{
+use esp_idf_svc::hal::{
     gpio::{Input, InputPin, InterruptType, OutputPin, PinDriver, Pull},
     peripheral::Peripheral,
     sys::{gpio_pull_mode_t_GPIO_PULLUP_ONLY, gpio_set_pull_mode},

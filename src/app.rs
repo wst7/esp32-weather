@@ -7,14 +7,17 @@ use crate::{
 };
 use chrono::Utc;
 use chrono_tz::Asia::Shanghai;
-use esp_idf_hal::{
-    gpio::{Gpio15, Gpio18, Gpio19, Gpio4},
-    i2c::{I2cConfig, I2cDriver},
-    prelude::Peripherals,
-    task::block_on,
-    units::KiloHertz,
+use esp_idf_svc::{
+    hal::{
+        gpio::{Gpio15, Gpio18, Gpio19, Gpio4},
+        i2c::{I2cConfig, I2cDriver},
+        prelude::Peripherals,
+        task::block_on,
+        units::KiloHertz,
+    },
+    nvs::{EspDefaultNvsPartition, EspNvs},
+    sntp::{EspSntp, SntpConf, SyncStatus},
 };
-use esp_idf_svc::sntp::{EspSntp, SntpConf, SyncStatus};
 use log::info;
 use std::{
     sync::{
@@ -66,6 +69,9 @@ pub struct App {
 
 impl App {
     pub fn new() -> anyhow::Result<Self> {
+        let nvs_partition = EspDefaultNvsPartition::take()?;
+        let mut wifi_nvs = EspNvs::new(nvs_partition, "wifi", true)?;
+
         let peripherals = Peripherals::take().unwrap();
         // config i2c
         let i2c = peripherals.i2c0;
@@ -213,7 +219,12 @@ impl App {
 
                     loop {
                         let weather_data = weather_client.lock().unwrap().fetch_weather().unwrap();
-                        display_tx.send(DisplayMessage::UpdateWeather(weather_data.temp, weather_data.city)).unwrap();
+                        display_tx
+                            .send(DisplayMessage::UpdateWeather(
+                                weather_data.temp,
+                                weather_data.city,
+                            ))
+                            .unwrap();
                         thread::sleep(Duration::from_secs(3600));
                     }
                 })
@@ -263,7 +274,6 @@ impl App {
     }
 
     fn show_page(&mut self, page: AppPage) {
-       
         match page {
             AppPage::Home => self.render_home_page(),
             AppPage::WifiConfig => self.render_wifi_page(),
